@@ -359,10 +359,10 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
     }
 
     /* Optimal ATC for FSK: track separate envelopes and noise floors for
-       the mark and space tones, then compute the bias-corrected decision
-       value v3 (same formula as the RTTY "Optimal ATC" demodulator).
-       Edge detection continues to use the raw demod_sample above; only
-       the bit decision (cur_bit) is taken from the ATC output. */
+       the mark and space tones, compute the bias-corrected bit decision
+       value (cur_atc_val, same formula as the RTTY "Optimal ATC" demodulator),
+       and normalise demod_sample so that both edge transition directions
+       produce equal bit_edge_val regardless of tone amplitude asymmetry. */
     if (sc_st->fsk) {
         double m = (double)channel_1;
         double s = (double)channel_2;
@@ -371,16 +371,16 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
            env_attack  : fast rise  (1/4 symbol)
            env_decay   : slow fall  (16 symbols)
            noise_decay : very slow rise (48 symbols) */
-        int env_attack  = sc_st->demod_samples_per_bit >> 2;
-        if (env_attack < 1) env_attack = 1;
-        int env_decay   = sc_st->demod_samples_per_bit << 4;
-        int noise_decay = sc_st->demod_samples_per_bit * 48;
+        double env_attack  = sc_st->demod_samples_per_bit / 4.0;
+        if (env_attack < 1.0) env_attack = 1.0;
+        double env_decay   = sc_st->demod_samples_per_bit * 16.0;
+        double noise_decay = sc_st->demod_samples_per_bit * 48.0;
 
         /* asymmetric exponential moving averages */
-        sc_st->mark_env   += (m - sc_st->mark_env)    / (double)(m > sc_st->mark_env    ? env_attack : env_decay);
-        sc_st->space_env  += (s - sc_st->space_env)   / (double)(s > sc_st->space_env   ? env_attack : env_decay);
-        sc_st->mark_noise += (m - sc_st->mark_noise)  / (double)(m < sc_st->mark_noise  ? env_attack : noise_decay);
-        sc_st->space_noise+= (s - sc_st->space_noise) / (double)(s < sc_st->space_noise ? env_attack : noise_decay);
+        sc_st->mark_env   += (m - sc_st->mark_env)    / (m > sc_st->mark_env    ? env_attack : env_decay);
+        sc_st->space_env  += (s - sc_st->space_env)   / (s > sc_st->space_env   ? env_attack : env_decay);
+        sc_st->mark_noise += (m - sc_st->mark_noise)  / (m < sc_st->mark_noise  ? env_attack : noise_decay);
+        sc_st->space_noise+= (s - sc_st->space_noise) / (s < sc_st->space_noise ? env_attack : noise_decay);
 
         double noise_floor = sc_st->mark_noise < sc_st->space_noise
                            ? sc_st->mark_noise : sc_st->space_noise;
@@ -398,6 +398,16 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
         sc_st->cur_atc_val = (mclipped - noise_floor) * mn
                            - (sclipped - noise_floor) * sn
                            - 0.25 * (mn * mn - sn * sn);
+
+        /* Normalised demod_sample for edge detection: dividing by the sum
+           of both envelopes maps the signal to [-SCALE, +SCALE] regardless
+           of absolute amplitude, so mark->space and space->mark transitions
+           produce the same bit_edge_val.  Guard against near-zero denominator
+           during startup. */
+        double env_sum = sc_st->mark_env + sc_st->space_env;
+        demod_sample = (env_sum > 1.0)
+                     ? (int16_t)((m - s) / env_sum * SCAMP_FSK_NORM_SCALE)
+                     : 0;
     }
 
     sc_st->ct_sum += max_val;
@@ -431,6 +441,18 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
         sc_st->ct_average = 0;
         sc_st->ct_sum = 0;
       }
+    }
+
+    /* For FSK: override the AGC-derived thresholds every sample using the
+       ATC envelopes.  edge_thr is a fixed constant matched to the normalised
+       demod_sample scale so it never needs amplitude information.  squelch_thr
+       tracks the dominant tone envelope and gates output when no signal is
+       present.  This replaces the 512-sample AGC lag with immediate adaptation. */
+    if (sc_st->fsk) {
+        sc_st->edge_thr = SCAMP_FSK_NORM_EDGE_THR;
+        double env_max = sc_st->mark_env > sc_st->space_env
+                       ? sc_st->mark_env : sc_st->space_env;
+        sc_st->squelch_thr = (uint16_t)(env_max * 0.5);
     }
 
     /* calculate the difference between the modulated signal between now and one bit period ago to see
