@@ -88,26 +88,21 @@ void scamp::init()
 
 scamp::~scamp()
 {
+	delete mark_filt;
+	delete space_filt;
 	if (scampviewer) delete scampviewer;
 }
 
 void scamp::reset_filters()
 {
-	circbuffer_head_tail = 0;
+	delete mark_filt;
+	mark_filt = new fftfilt(channel_bandwidth / samplerate, 512);
+	mark_filt->rtty_filter(channel_bandwidth / samplerate);
+	delete space_filt;
+	space_filt = new fftfilt(channel_bandwidth / samplerate, 512);
+	space_filt->rtty_filter(channel_bandwidth / samplerate);
+	mark_phase = space_phase = 0.0;
 	sample_count = 0;
-	circbuffer1_ac_re = 0;
-	circbuffer1_ac_im = 0;
-	circbuffer2_ac_re = 0;
-	circbuffer2_ac_im = 0;
-	for (int i=0;i<SCAMP_CIRCBUFFER_MAX;i++)
-	{
-		circbuffer1_re[i] = 0;
-		circbuffer1_im[i] = 0;
-		circbuffer2_re[i] = 0;
-		circbuffer2_im[i] = 0;
-	}
-	circ_phase = 0.0;
-	carrier_phase = 0.0;
 }
 
 void scamp::restart()
@@ -174,7 +169,7 @@ void scamp::restart()
 	        break;
 	}
 
-    transmit_scale = 1.0/((double)circbuffer_samples);
+    transmit_scale = 1.0;
 	sigpwr = noisepwr = 1e-10;
 	scamp_protocol.init(protocol);
 	
@@ -194,7 +189,8 @@ void scamp::restart()
 scamp::scamp(trx_mode tty_mode)
 {
 	scampviewer = 0;
-	
+	mark_filt = space_filt = nullptr;
+
 	mode = tty_mode;
 
 	samplerate = SCAMP_SampleRate;
@@ -282,76 +278,32 @@ void scamp::Metric()
 
 int scamp::rx_process(const double *buf, int len)
 {
-	const double DECAY_FUDGE_FACTOR = 0.999999999999; 
-			/* Fudge factor to prevent roundoff error accumulation */
 	const double *buffer = buf;
 	int length = len;
-	double phaseinc = frequency*TWOPI/((double)samplerate);
 
-    for (int samp=0;samp<length;samp++)
-    {
-		double val = buffer[samp];
-		double mag1, mag2;
-		if (scamp_fsk_mode)
-		{
-		   double buf_re = val * cos(carrier_phase + circ_phase);
-		   double buf_im = val * sin(carrier_phase + circ_phase);
-		   circbuffer1_ac_re += buf_re - circbuffer1_re[circbuffer_head_tail];
-		   circbuffer1_ac_re *= DECAY_FUDGE_FACTOR;
-		   circbuffer1_ac_im += buf_im - circbuffer1_im[circbuffer_head_tail];
-		   circbuffer1_ac_im *= DECAY_FUDGE_FACTOR;
-		   circbuffer1_re[circbuffer_head_tail] = buf_re;
-		   circbuffer1_im[circbuffer_head_tail] = buf_im;
-		   mag1 = sqrt(circbuffer1_ac_re*circbuffer1_ac_re+circbuffer1_ac_im*circbuffer1_ac_im);
-		   
-		   buf_re = val * cos(carrier_phase - circ_phase);
-		   buf_im = val * sin(carrier_phase - circ_phase);
-		   circbuffer2_ac_re += buf_re - circbuffer2_re[circbuffer_head_tail];
-		   circbuffer2_ac_re *= DECAY_FUDGE_FACTOR;
-		   circbuffer2_ac_im += buf_im - circbuffer2_im[circbuffer_head_tail];
-		   circbuffer2_ac_im *= DECAY_FUDGE_FACTOR;
-		   circbuffer2_re[circbuffer_head_tail] = buf_re;
-		   circbuffer2_im[circbuffer_head_tail] = buf_im;
-		   mag2 = sqrt(circbuffer2_ac_re*circbuffer2_ac_re+circbuffer2_ac_im*circbuffer2_ac_im);
-		   
-		   circ_phase += shift_freq;
-		   if (circ_phase >= TWOPI)
-				circ_phase -= TWOPI;
-		} else
-		{
-		   double buf_re = val * cos(carrier_phase);
-		   double buf_im = val * sin(carrier_phase);
-		   circbuffer1_ac_re += buf_re - circbuffer1_re[circbuffer_head_tail];
-		   circbuffer1_ac_re *= DECAY_FUDGE_FACTOR;
-		   circbuffer1_ac_im += buf_im - circbuffer1_im[circbuffer_head_tail];
-		   circbuffer1_ac_im *= DECAY_FUDGE_FACTOR;
-		   circbuffer1_re[circbuffer_head_tail] = buf_re;
-		   circbuffer1_im[circbuffer_head_tail] = buf_im;
-		   mag1 = sqrt(circbuffer1_ac_re*circbuffer1_ac_re+circbuffer1_ac_im*circbuffer1_ac_im);
-		   mag2 = 0.0;
-		}
-		if ((++circbuffer_head_tail) >= circbuffer_samples)
-			circbuffer_head_tail = 0;
-	    if ((++sample_count) >= sample_count_check)
-		{
-			int recv_chars[2];
-			sample_count = 0;
-			/* call SCAMP code */
-			scamp_protocol.decode_process(mag1*transmit_scale,mag2*transmit_scale,recv_chars);
-			if (recv_chars[0] != -1) 
-			{
-				put_rx_char(recv_chars[0]);
-				if (recv_chars[0] == '\r') put_rx_char('\n');
-			}
-			if (recv_chars[1] != -1) 
-			{
-				put_rx_char(recv_chars[1]);
-				if (recv_chars[1] == '\r') put_rx_char('\n');
+	while (length-- > 0) {
+		cmplx z(*buffer, *buffer);
+		buffer++;
+		cmplx *zp_mark, *zp_space;
+		mark_filt->run(mixer(mark_phase, frequency + shift / 2.0, z), &zp_mark);
+		int n_out = space_filt->run(mixer(space_phase, frequency - shift / 2.0, z), &zp_space);
+		for (int i = 0; i < n_out; i++) {
+			if (++sample_count >= sample_count_check) {
+				sample_count = 0;
+				int recv_chars[2];
+				double mag1 = abs(zp_mark[i]);
+				double mag2 = scamp_fsk_mode ? abs(zp_space[i]) : 0.0;
+				scamp_protocol.decode_process(mag1, mag2, recv_chars);
+				if (recv_chars[0] != -1) {
+					put_rx_char(recv_chars[0]);
+					if (recv_chars[0] == '\r') put_rx_char('\n');
+				}
+				if (recv_chars[1] != -1) {
+					put_rx_char(recv_chars[1]);
+					if (recv_chars[1] == '\r') put_rx_char('\n');
+				}
 			}
 		}
-		carrier_phase += phaseinc;
-		if (carrier_phase >= TWOPI)
-			carrier_phase -= TWOPI;
 	}
 
 	if ( !progdefaults.report_when_visible ||

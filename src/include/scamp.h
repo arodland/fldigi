@@ -45,7 +45,6 @@
 #define dispwidth 100
 
 #define SCAMP_TRANSBUFFER_MAX 1536
-#define SCAMP_CIRCBUFFER_MAX 1536
 #define SCAMP_SAMPLE_COUNT_CHECK_RATE 500
 
 class scamp : public modem {
@@ -60,14 +59,10 @@ private:
     double symbol_freq_offset;
     double scamp_fsk_mode;
     
-    double circbuffer1_ac_re;
-    double circbuffer1_ac_im;
-    double circbuffer1_re[SCAMP_CIRCBUFFER_MAX];
-    double circbuffer1_im[SCAMP_CIRCBUFFER_MAX];
-    double circbuffer2_ac_re;
-    double circbuffer2_ac_im;
-    double circbuffer2_re[SCAMP_CIRCBUFFER_MAX];
-    double circbuffer2_im[SCAMP_CIRCBUFFER_MAX];
+    fftfilt *mark_filt;
+    fftfilt *space_filt;
+    double mark_phase;
+    double space_phase;
     int circbuffer_samples;
     double transmit_scale;
     int sample_count;
@@ -76,9 +71,13 @@ private:
     double channel_bandwidth;
     double mode_bandwidth;
     double shift_freq;
-    double circ_phase;
-    double carrier_phase;
-    int circbuffer_head_tail;
+
+    cmplx mixer(double &phase, double f, cmplx in) {
+        cmplx z = cmplx(cos(phase), sin(phase)) * in;
+        phase -= TWOPI * f / samplerate;
+        if (phase < -TWOPI) phase += TWOPI;
+        return z;
+    }
 
 	double *pipe;
 	double *dsppipe;

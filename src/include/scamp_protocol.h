@@ -72,6 +72,13 @@ freely, subject to the following restrictions:
 #define SCAMP_AVG_CT_PWR2_FSK 9
 #define SCAMP_AVG_CT_PWR2_OOK 12
 
+/* Scale factor and edge threshold for the normalised FSK demod_buffer.
+   demod_sample is stored as (m - s) / (mark_env + space_env) * SCAMP_FSK_NORM_SCALE,
+   so a clean bit transition always produces bit_edge_val near 2 * SCAMP_FSK_NORM_SCALE
+   regardless of signal amplitude.  SCAMP_FSK_NORM_EDGE_THR is set at half-scale. */
+#define SCAMP_FSK_NORM_SCALE    16384
+#define SCAMP_FSK_NORM_EDGE_THR 8192
+
 #define SCAMP_FRAME_FIFO_LENGTH 8
 
 #ifdef SCAMP_VERY_SLOW_MODES
@@ -147,6 +154,34 @@ typedef struct _scamp_state
   
   uint8_t   resync_frames;
   uint8_t   repeat_frames;
+
+  /* ATC (automatic threshold correction) state for FSK -- mirrors the
+     approach used by the RTTY modem's "Optimal ATC" demodulator.
+     All values are in the same units as the raw channel magnitudes
+     passed to scamp_new_sample (i.e. channel_1 / channel_2 scale). */
+  double    mark_env;      /* mark-tone signal envelope (asymmetric decay avg) */
+  double    space_env;     /* space-tone signal envelope */
+  double    mark_noise;    /* mark-tone noise floor (slow-rising tracker) */
+  double    space_noise;   /* space-tone noise floor */
+  double    cur_atc_val;   /* latest ATC decision value; sign gives the bit */
+
+  /* Soft-decision Golay decoder state (FSK only).
+     llr_buffer[k] holds the log-likelihood ratio for the k-th received bit
+     of the current frame (k=0 first, llr > 0 means bit=1 in current_word).
+     Populated one entry per received bit; read by golay_chase_decode()
+     when a complete 30-bit frame is ready. */
+  double    llr_buffer[30];
+
+  /* Rolling 30-sample LLR ring for soft sync acquisition (FSK only).
+     Updated on every received bit regardless of sync state, so it always
+     reflects the last 30 received bits in parallel with current_word.
+     llr_ring_head is the index of the NEXT slot to write. */
+  double    llr_ring[30];
+  uint8_t   llr_ring_head;
+
+  /* Feature flags set from progdefaults at runtime. */
+  uint8_t   use_soft_golay;  /* enable Chase soft-decision Golay decoder */
+  uint8_t   use_soft_sync;   /* enable soft sync acquisition              */
 } scamp_state;
 
 class SCAMP_protocol {
