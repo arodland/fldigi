@@ -175,6 +175,7 @@ void scamp::restart()
 	}
 
     transmit_scale = 1.0/((double)circbuffer_samples);
+	sigpwr = noisepwr = 1e-10;
 	scamp_protocol.init(protocol);
 	
 	set_bandwidth(mode_bandwidth);

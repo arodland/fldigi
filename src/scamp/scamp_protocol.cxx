@@ -357,6 +357,49 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
                                         max_val = channel_2 > channel_1 ? channel_2 : channel_1;
                                         break;
     }
+
+    /* Optimal ATC for FSK: track separate envelopes and noise floors for
+       the mark and space tones, then compute the bias-corrected decision
+       value v3 (same formula as the RTTY "Optimal ATC" demodulator).
+       Edge detection continues to use the raw demod_sample above; only
+       the bit decision (cur_bit) is taken from the ATC output. */
+    if (sc_st->fsk) {
+        double m = (double)channel_1;
+        double s = (double)channel_2;
+
+        /* Time constants in samples, matching RTTY's symbollen ratios.
+           env_attack  : fast rise  (1/4 symbol)
+           env_decay   : slow fall  (16 symbols)
+           noise_decay : very slow rise (48 symbols) */
+        int env_attack  = sc_st->demod_samples_per_bit >> 2;
+        if (env_attack < 1) env_attack = 1;
+        int env_decay   = sc_st->demod_samples_per_bit << 4;
+        int noise_decay = sc_st->demod_samples_per_bit * 48;
+
+        /* asymmetric exponential moving averages */
+        sc_st->mark_env   += (m - sc_st->mark_env)    / (double)(m > sc_st->mark_env    ? env_attack : env_decay);
+        sc_st->space_env  += (s - sc_st->space_env)   / (double)(s > sc_st->space_env   ? env_attack : env_decay);
+        sc_st->mark_noise += (m - sc_st->mark_noise)  / (double)(m < sc_st->mark_noise  ? env_attack : noise_decay);
+        sc_st->space_noise+= (s - sc_st->space_noise) / (double)(s < sc_st->space_noise ? env_attack : noise_decay);
+
+        double noise_floor = sc_st->mark_noise < sc_st->space_noise
+                           ? sc_st->mark_noise : sc_st->space_noise;
+
+        /* clip instantaneous magnitudes to their envelopes */
+        double mclipped = m < sc_st->mark_env  ? m : sc_st->mark_env;
+        double sclipped = s < sc_st->space_env ? s : sc_st->space_env;
+        if (mclipped < noise_floor) mclipped = noise_floor;
+        if (sclipped < noise_floor) sclipped = noise_floor;
+
+        /* Optimal ATC (v3): noise-floor-subtracted, envelope-weighted
+           difference with quadratic bias correction term */
+        double mn = sc_st->mark_env  - noise_floor;
+        double sn = sc_st->space_env - noise_floor;
+        sc_st->cur_atc_val = (mclipped - noise_floor) * mn
+                           - (sclipped - noise_floor) * sn
+                           - 0.25 * (mn * mn - sn * sn);
+    }
+
     sc_st->ct_sum += max_val;
     /* This is the automatic "gain" control (threshold level control).
        find the average of a certain number of samples (power of two for calculation
@@ -412,7 +455,8 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
             {
                 sc_st->max_bit_edge_val = sc_st->bit_edge_val;  /* if so, reset the edge center counter */
                 sc_st->next_edge_ctr = 1;
-                sc_st->cur_bit = demod_sample;              /* save the bit occurring at the edge */
+                /* For FSK use the ATC output; for OOK use the raw demod sample */
+                sc_st->cur_bit = sc_st->fsk ? (sc_st->cur_atc_val > 0.0 ? 1 : -1) : demod_sample;
             } else
                 sc_st->next_edge_ctr++;                     /* otherwise count that we have passed the edge peak */
         } else
@@ -428,7 +472,8 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
             {
                 if (sc_st->edge_ctr == 0)
                 {
-                    sc_st->cur_bit = demod_sample;              /* save the bit */
+                    /* For FSK use the ATC output; for OOK use the raw demod sample */
+                    sc_st->cur_bit = sc_st->fsk ? (sc_st->cur_atc_val > 0.0 ? 1 : -1) : demod_sample;
                     sc_st->edge_ctr = sc_st->demod_samples_per_bit;  /* reset and wait for the next bit edge to come along */
                     received_bit = 1;                       /* an edge hasn't been detected but a bit interval happened */
                 }
