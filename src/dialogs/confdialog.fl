@@ -6522,6 +6522,13 @@ progdefaults.changed = true;}
         code0 {o->value(progdefaults.ScampRepeat);}
         code1 {o->labelsize(FL_NORMAL_SIZE);}
       }
+      Fl_Check_Button chkScampSoftGolay {
+        label {Soft Golay decoding}
+        callback {progdefaults.ScampSoftGolay = o->value(); progdefaults.changed = true;}
+        tooltip {Use soft-decision Chase decoder for improved performance at low SNR} xywh {229 254 180 18} down_box DOWN_BOX
+        code0 {o->value(progdefaults.ScampSoftGolay);}
+        code1 {o->labelsize(FL_NORMAL_SIZE);}
+      }
     }
     Fl_Group {} {
       label {Modem/TTY/Rx}

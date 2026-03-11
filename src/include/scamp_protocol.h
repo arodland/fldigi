@@ -194,6 +194,7 @@ public:
 	void init(uint8_t protocol);
 	void decode_process(double mag1, double mag2, int recv_chars[2]);
 	void set_resync_repeat_frames(int resync_frames, int repeat_frames);
+	void set_soft_options(bool soft_golay);
 	int send_char(int c, uint8_t frames_num_max, uint32_t *fr);
 
 };

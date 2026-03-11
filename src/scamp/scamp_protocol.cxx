@@ -24,6 +24,7 @@ freely, subject to the following restrictions:
 #include <config.h>
 #include <iostream>
 #include <fstream>
+#include <cmath>
 
 #include "scamp_protocol.h"
 
@@ -289,12 +290,88 @@ static void scamp_retrain(scamp_state *sc_st)
   sc_st->resync = 0;  
 }
 
+/* Map Golay codeword bit index (0-23) to llr_buffer[] position.
+   The 30-bit wire frame has reversal bits at positions 29,24,19,14,9,4;
+   data bits occupy the remaining 25 positions (but llr_buffer has 30 entries
+   for all 30 received wire bits, including the reversal bits). */
+static const uint8_t golay_to_llr_buf[24] = {
+    29, 28, 27, 26,   /* codeword bits  3: 0 */
+    24, 23, 22, 21,   /* codeword bits  7: 4 */
+    19, 18, 17, 16,   /* codeword bits 11: 8 */
+    14, 13, 12, 11,   /* codeword bits 15:12 */
+     9,  8,  7,  6,   /* codeword bits 19:16 */
+     4,  3,  2,  1    /* codeword bits 23:20 */
+};
+/* reversal bit at wire position rev_buf_pos[g] = NOT(Golay MSB of group g),
+   so subtracting its LLR adds evidence to the corresponding Golay MSB LLR */
+static const uint8_t rev_buf_pos[6]   = {  0,  5, 10, 15, 20, 25 };
+static const uint8_t rev_golay_idx[6] = { 23, 19, 15, 11,  7,  3 };
+
+static double golay_soft_metric(uint16_t decoded, const double *golay_llr)
+{
+    uint32_t enc = golay_encode(decoded);
+    double m = 0.0;
+    for (int i = 0; i < 24; i++)
+        m += golay_llr[i] * ((enc >> i & 1) ? 1.0 : -1.0);
+    return m;
+}
+
+/* Chase-2 soft Golay decoder (p=4): tries all 15 non-trivial flip patterns
+   on the 4 least-reliable bits, picks the valid codeword with best soft metric */
+static uint16_t golay_chase_decode(uint32_t hard_codeword,
+                                   const double *golay_llr,
+                                   uint8_t *biterrs)
+{
+    uint16_t hard_result = golay_decode(hard_codeword, biterrs);
+    if (hard_result != 0xFFFF && *biterrs == 0)
+        return hard_result;
+    /* sort indices by ascending |LLR| (least reliable first) */
+    uint8_t order[24];
+    for (int i = 0; i < 24; i++) order[i] = i;
+    for (int i = 1; i < 24; i++) {
+        uint8_t k  = order[i];
+        double  ka = fabs(golay_llr[k]);
+        int j = i - 1;
+        while (j >= 0 && fabs(golay_llr[order[j]]) > ka) {
+            order[j + 1] = order[j]; j--;
+        }
+        order[j + 1] = k;
+    }
+    double   best_metric  = (hard_result != 0xFFFF) ? golay_soft_metric(hard_result, golay_llr) : -1e30;
+    uint16_t best_result  = hard_result;
+    uint8_t  best_biterrs = (hard_result != 0xFFFF) ? *biterrs : 0;
+    for (int pat = 1; pat < 16; pat++) {
+        uint32_t trial = hard_codeword;
+        for (int i = 0; i < 4; i++)
+            if (pat & (1 << i))
+                trial ^= (uint32_t)1 << order[i];
+        uint8_t  be;
+        uint16_t result = golay_decode(trial, &be);
+        if (result == 0xFFFF) continue;
+        double m = golay_soft_metric(result, golay_llr);
+        if (m > best_metric) {
+            best_metric = m; best_result = result; best_biterrs = be;
+        }
+    }
+    *biterrs = best_biterrs;
+    return best_result;
+}
+
 static void scamp_decode_process(scamp_state *sc_st, uint32_t fr)
 {
   uint8_t biterrs, bytes[2], nb;
   uint16_t gf;
   fr = scamp_remove_reversal_bits(fr);
-  gf = golay_decode(fr,&biterrs);
+  if (sc_st->fsk && sc_st->use_soft_golay) {
+      double golay_llr[24];
+      for (int i = 0; i < 24; i++)
+          golay_llr[i] = sc_st->llr_buffer[golay_to_llr_buf[i]];
+      for (int g = 0; g < 6; g++)
+          golay_llr[rev_golay_idx[g]] -= sc_st->llr_buffer[rev_buf_pos[g]];
+      gf = golay_chase_decode(fr, golay_llr, &biterrs);
+  } else {
+      gf = golay_decode(fr, &biterrs);
+  }
   if (gf == 0xFFFF)
   {
 	sc_st->recv_chars[0] = '#';
@@ -801,6 +878,11 @@ void SCAMP_protocol::set_resync_repeat_frames(int resync_frames, int repeat_fram
 		repeat_frames = 1;
 	sc.resync_frames = resync_frames;
 	sc.repeat_frames = repeat_frames;
+}
+
+void SCAMP_protocol::set_soft_options(bool soft_golay)
+{
+    sc.use_soft_golay = soft_golay ? 1 : 0;
 }
 
 int SCAMP_protocol::send_char(int c, uint8_t max_frames, uint32_t *fr)
