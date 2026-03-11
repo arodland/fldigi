@@ -6529,6 +6529,13 @@ progdefaults.changed = true;}
         code0 {o->value(progdefaults.ScampSoftGolay);}
         code1 {o->labelsize(FL_NORMAL_SIZE);}
       }
+      Fl_Check_Button chkScampSoftSync {
+        label {Soft sync acquisition}
+        callback {progdefaults.ScampSoftSync = o->value(); progdefaults.changed = true;}
+        tooltip {Use soft-decision sync correlator to acquire sync with more bit errors} xywh {229 281 180 18} down_box DOWN_BOX
+        code0 {o->value(progdefaults.ScampSoftSync);}
+        code1 {o->labelsize(FL_NORMAL_SIZE);}
+      }
     }
     Fl_Group {} {
       label {Modem/TTY/Rx}

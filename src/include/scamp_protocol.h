@@ -64,6 +64,13 @@ freely, subject to the following restrictions:
 
 #define SCAMP_THRESHOLD_COUNTER_MAX 2000
 
+/* Normalised soft-sync threshold.  The soft score is the dot-product of
+   the 30-bit LLR window with the sync pattern, divided by the sum of
+   |LLR| (so it lies in [-1, +1]).  0.5 roughly corresponds to ≥22 of
+   30 bits agreeing for equal-reliability bits, but tolerates more errors
+   when the wrong bits carry low confidence. */
+#define SCAMP_SOFT_SYNC_THR 0.65
+
 #define SCAMP_BLANK_CODEWORD 0xAAAAAAAA
 
 #define SCAMP_PWR_THR_DEF_FSK 0
@@ -194,7 +201,7 @@ public:
 	void init(uint8_t protocol);
 	void decode_process(double mag1, double mag2, int recv_chars[2]);
 	void set_resync_repeat_frames(int resync_frames, int repeat_frames);
-	void set_soft_options(bool soft_golay);
+	void set_soft_options(bool soft_golay, bool soft_sync);
 	int send_char(int c, uint8_t frames_num_max, uint32_t *fr);
 
 };

@@ -281,7 +281,8 @@ int scamp::rx_process(const double *buf, int len)
 	const double *buffer = buf;
 	int length = len;
 
-	scamp_protocol.set_soft_options(progdefaults.ScampSoftGolay);
+	scamp_protocol.set_soft_options(progdefaults.ScampSoftGolay,
+	                                progdefaults.ScampSoftSync);
 
 	while (length-- > 0) {
 		cmplx z(*buffer, *buffer);

@@ -613,6 +613,12 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
       scamp_retrain(sc_st);
       sc_st->reset_protocol = 0;
     }
+    /* Update rolling LLR ring (used for soft sync) with the latest bit LLR */
+    if (sc_st->fsk) {
+        double raw_llr = sc_st->cur_atc_val;
+        sc_st->llr_ring[sc_st->llr_ring_head] = sc_st->polarity ? -raw_llr : raw_llr;
+        sc_st->llr_ring_head = (sc_st->llr_ring_head + 1) % 30;
+    }
     if ((!sc_st->fsk) || thr)  /* if there is a bit to sync to */
     {
       hamming_weight = hamming_weight_30(sc_st->current_word ^ SCAMP_SYNC_CODEWORD);
@@ -621,6 +627,24 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
         scamp_reset_codeword(sc_st);
         sc_st->resync = 1;
         return;
+      }
+      /* Soft sync correlator: normalized dot-product of LLR ring with sync pattern.
+         Only active before acquiring sync (resync==0) to avoid false triggers during
+         data reception. */
+      if (sc_st->fsk && !sc_st->resync && sc_st->use_soft_sync) {
+          double soft_score = 0.0, llr_sum = 0.0;
+          for (int b = 0; b < 30; b++) {
+              int sync_bit = (SCAMP_SYNC_CODEWORD >> b) & 1;
+              int ring_idx = ((int)sc_st->llr_ring_head - 1 - b + 90) % 30;
+              double llr   = sc_st->llr_ring[ring_idx];
+              soft_score  += llr * (sync_bit ? 1.0 : -1.0);
+              llr_sum     += fabs(llr);
+          }
+          if (llr_sum > 0.0 && soft_score / llr_sum > SCAMP_SOFT_SYNC_THR) {
+              scamp_reset_codeword(sc_st);
+              sc_st->resync = 1;
+              return;
+          }
       }
       /* if we 15 of the last 16 bits zeros with fsk, that means we have a reversed polarity start */
       hamming_weight = hamming_weight_16(sc_st->current_word);
@@ -636,7 +660,13 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
         scamp_retrain(sc_st);
         return;
       }
-    } 
+    }
+    /* Accumulate per-bit LLR for the soft Golay decoder while synced */
+    if (sc_st->fsk && sc_st->resync && sc_st->current_bit_no < 30) {
+        double raw_llr = sc_st->cur_atc_val;
+        sc_st->llr_buffer[sc_st->current_bit_no] =
+            sc_st->polarity ? -raw_llr : raw_llr;
+    }
     /* if we have synced, and we have 30 bits, we have a frame */
     sc_st->current_bit_no++;
     if ((sc_st->current_bit_no >= 30) && (sc_st->resync))  /* we have a complete frame */
@@ -880,9 +910,10 @@ void SCAMP_protocol::set_resync_repeat_frames(int resync_frames, int repeat_fram
 	sc.repeat_frames = repeat_frames;
 }
 
-void SCAMP_protocol::set_soft_options(bool soft_golay)
+void SCAMP_protocol::set_soft_options(bool soft_golay, bool soft_sync)
 {
     sc.use_soft_golay = soft_golay ? 1 : 0;
+    sc.use_soft_sync  = soft_sync  ? 1 : 0;
 }
 
 int SCAMP_protocol::send_char(int c, uint8_t max_frames, uint32_t *fr)

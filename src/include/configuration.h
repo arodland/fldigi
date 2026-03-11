@@ -734,6 +734,9 @@
         ELEM_(bool, ScampSoftGolay, "SCAMPSOFTGOLAY",                                   \
               "SCAMP soft Golay decoding",                                              \
               true)                                                                     \
+        ELEM_(bool, ScampSoftSync, "SCAMPSOFTSYNC",                                     \
+              "SCAMP soft sync acquisition",                                            \
+              true)                                                                     \
         /* FELD HELL */                                                                 \
         ELEM_(double, HELL_BW, "HELL_BW0", "Feld Hell working bandwidth",  245.0)       \
         ELEM_(double, HELL_BW_FH, "HELL_BW1", "FH bandwidth",  245.0)                   \

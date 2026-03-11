@@ -5102,6 +5102,12 @@ static void cb_chkScampSoftGolay(Fl_Check_Button* o, void*) {
   progdefaults.ScampSoftGolay = o->value(); progdefaults.changed = true;
 }
 
+Fl_Check_Button *chkScampSoftSync=(Fl_Check_Button *)0;
+
+static void cb_chkScampSoftSync(Fl_Check_Button* o, void*) {
+  progdefaults.ScampSoftSync = o->value(); progdefaults.changed = true;
+}
+
 Fl_ListBox *i_listbox_rtty_afc_speed=(Fl_ListBox *)0;
 
 static void cb_i_listbox_rtty_afc_speed(Fl_ListBox* o, void*) {
@@ -14643,6 +14649,13 @@ Fl_Double_Window* ConfigureDialog() {
         o->value(progdefaults.ScampSoftGolay);
         o->labelsize(FL_NORMAL_SIZE);
       } // Fl_Check_Button* chkScampSoftGolay
+      { Fl_Check_Button* o = chkScampSoftSync = new Fl_Check_Button(229, 281, 180, 18, gettext("Soft sync acquisition"));
+        chkScampSoftSync->tooltip(gettext("Use soft-decision sync correlator to acquire sync with more bit errors"));
+        chkScampSoftSync->down_box(FL_DOWN_BOX);
+        chkScampSoftSync->callback((Fl_Callback*)cb_chkScampSoftSync);
+        o->value(progdefaults.ScampSoftSync);
+        o->labelsize(FL_NORMAL_SIZE);
+      } // Fl_Check_Button* chkScampSoftSync
       CONFIG_PAGE *p = new CONFIG_PAGE(o, _("Modem/SCAMP"));
       config_pages.push_back(p);
       tab_tree->add(_("Modem/SCAMP"));
