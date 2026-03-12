@@ -168,8 +168,7 @@ typedef struct _scamp_state
      passed to scamp_new_sample (i.e. channel_1 / channel_2 scale). */
   double    mark_env;      /* mark-tone signal envelope (asymmetric decay avg) */
   double    space_env;     /* space-tone signal envelope */
-  double    mark_noise;    /* mark-tone noise floor (slow-rising tracker) */
-  double    space_noise;   /* space-tone noise floor */
+  double    noise_floor;   /* shared noise floor: slow-rising tracker of min(mark,space) */
   double    cur_atc_val;   /* latest ATC decision value; sign gives the bit */
 
   /* Soft-decision Golay decoder state (FSK only).

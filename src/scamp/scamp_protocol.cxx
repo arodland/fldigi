@@ -452,15 +452,14 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
         if (env_attack < 1.0) env_attack = 1.0;
         double env_decay   = sc_st->demod_samples_per_bit * 16.0;
         double noise_decay = sc_st->demod_samples_per_bit * 48.0;
+        double noise_level = std::min(m, s);
 
         /* asymmetric exponential moving averages */
         sc_st->mark_env   += (m - sc_st->mark_env)    / (m > sc_st->mark_env    ? env_attack : env_decay);
         sc_st->space_env  += (s - sc_st->space_env)   / (s > sc_st->space_env   ? env_attack : env_decay);
-        sc_st->mark_noise += (m - sc_st->mark_noise)  / (m < sc_st->mark_noise  ? env_attack : noise_decay);
-        sc_st->space_noise+= (s - sc_st->space_noise) / (s < sc_st->space_noise ? env_attack : noise_decay);
+        sc_st->noise_floor += (noise_level - sc_st->noise_floor) / noise_decay;
 
-        double noise_floor = sc_st->mark_noise < sc_st->space_noise
-                           ? sc_st->mark_noise : sc_st->space_noise;
+        double noise_floor = sc_st->noise_floor;
 
         /* clip instantaneous magnitudes to their envelopes */
         double mclipped = m < sc_st->mark_env  ? m : sc_st->mark_env;
