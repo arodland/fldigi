@@ -607,12 +607,6 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
     if ((!sc_st->fsk) || thr)  /* if there is a bit to sync to */
     {
       hamming_weight = hamming_weight_30(sc_st->current_word ^ SCAMP_SYNC_CODEWORD);
-      if (hamming_weight < 4)  /* 30-bit resync word has occurred! */
-      {
-        scamp_reset_codeword(sc_st);
-        sc_st->resync = 1;
-        return;
-      }
       /* Soft sync correlator: normalized dot-product of LLR ring with sync pattern.
          Only active before acquiring sync (resync==0) to avoid false triggers during
          data reception. */
@@ -630,6 +624,11 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
               sc_st->resync = 1;
               return;
           }
+      } else if (hamming_weight < 4)  /* 30-bit resync word has occurred! */
+      {
+        scamp_reset_codeword(sc_st);
+        sc_st->resync = 1;
+        return;
       }
       /* if we 15 of the last 16 bits zeros with fsk, that means we have a reversed polarity start */
       hamming_weight = hamming_weight_16(sc_st->current_word);
