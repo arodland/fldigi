@@ -474,16 +474,6 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
         sc_st->cur_atc_val = (mclipped - noise_floor) * mn
                            - (sclipped - noise_floor) * sn
                            - 0.25 * (mn * mn - sn * sn);
-
-        /* Normalised demod_sample for edge detection: dividing by the sum
-           of both envelopes maps the signal to [-SCALE, +SCALE] regardless
-           of absolute amplitude, so mark->space and space->mark transitions
-           produce the same bit_edge_val.  Guard against near-zero denominator
-           during startup. */
-        double env_sum = sc_st->mark_env + sc_st->space_env;
-        demod_sample = (env_sum > 1.0)
-                     ? (int16_t)((m - s) / env_sum * SCAMP_FSK_NORM_SCALE)
-                     : 0;
     }
 
     sc_st->ct_sum += max_val;
@@ -519,13 +509,9 @@ static void scamp_new_sample(scamp_state *sc_st, uint16_t channel_1, uint16_t ch
       }
     }
 
-    /* For FSK: override the AGC-derived thresholds every sample using the
-       ATC envelopes.  edge_thr is a fixed constant matched to the normalised
-       demod_sample scale so it never needs amplitude information.  squelch_thr
-       tracks the dominant tone envelope and gates output when no signal is
-       present.  This replaces the 512-sample AGC lag with immediate adaptation. */
+    /* For FSK: update squelch threshold from ATC envelope trackers so it
+       responds immediately rather than waiting for the 512-sample AGC cycle. */
     if (sc_st->fsk) {
-        sc_st->edge_thr = SCAMP_FSK_NORM_EDGE_THR;
         double env_max = sc_st->mark_env > sc_st->space_env
                        ? sc_st->mark_env : sc_st->space_env;
         sc_st->squelch_thr = (uint16_t)(env_max * 0.5);

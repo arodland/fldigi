@@ -79,12 +79,6 @@ freely, subject to the following restrictions:
 #define SCAMP_AVG_CT_PWR2_FSK 9
 #define SCAMP_AVG_CT_PWR2_OOK 12
 
-/* Scale factor and edge threshold for the normalised FSK demod_buffer.
-   demod_sample is stored as (m - s) / (mark_env + space_env) * SCAMP_FSK_NORM_SCALE,
-   so a clean bit transition always produces bit_edge_val near 2 * SCAMP_FSK_NORM_SCALE
-   regardless of signal amplitude.  SCAMP_FSK_NORM_EDGE_THR is set at half-scale. */
-#define SCAMP_FSK_NORM_SCALE    16384
-#define SCAMP_FSK_NORM_EDGE_THR 8192
 
 #define SCAMP_FRAME_FIFO_LENGTH 8
 
